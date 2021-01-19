@@ -225,17 +225,9 @@ def get_step_calc_rule_ids(il_inputs_df, step_trigger_type_cols):
     il_inputs_calc_rules_df = il_inputs_df.reindex(columns=calc_mapping_cols)
 
     # Fill columns used to determine values for terms indicators and types
-    # Columns used depend on step trigger type or sub step trigger type if
-    # applicable
     # Set terms indicators and types to 0 if calc. rule should not be assigned
     def assign_terms_indicators_and_types(term, row):
         step_trigger_type = row['steptriggertype']
-        # Reassign step trigger type if sub step trigger types exist
-        if STEP_TRIGGER_TYPES[step_trigger_type].get('sub_step_trigger_types'):
-            sub_trigger_types = STEP_TRIGGER_TYPES[step_trigger_type]['sub_step_trigger_types']
-            if row['coverage_type_id'] in sub_trigger_types.keys():
-                step_trigger_type = sub_trigger_types[row['coverage_type_id']]
-
         if get_step_policies_oed_mapping(step_trigger_type).get(term) and row['assign_step_calcrule'] != False:
             return row[get_step_policies_oed_mapping(step_trigger_type)[term]]
         else:
@@ -318,7 +310,7 @@ def get_step_policytc_ids(
         'limit1', 'step_id', 'trigger_start', 'trigger_end', 'payout_start',
         'payout_end', 'limit2', 'scale1', 'scale2'
     ]
-    fm_policytc_df = il_inputs_df.loc[:, ['item_id'] + idx_cols + ['coverage_id', 'steptriggertype', 'assign_step_calcrule'] + policytc_cols[:4] + step_trigger_type_cols].drop_duplicates()
+    fm_policytc_df = il_inputs_df.reindex(columns=['item_id'] + idx_cols + ['coverage_id', 'steptriggertype', 'assign_step_calcrule'] + policytc_cols[:4] + step_trigger_type_cols).drop_duplicates()
 
     for col in policytc_cols[4:]:
         fm_policytc_df[col] = fm_policytc_df.apply(lambda x: x[get_step_policies_oed_mapping(x['steptriggertype'])[col]] if get_step_policies_oed_mapping(x['steptriggertype']).get(col) is not None and x['assign_step_calcrule'] == True else 0, axis=1)
@@ -930,6 +922,22 @@ def get_il_input_items(
         il_inputs_df['limit']
     )
 
+    # Before assigning calc. rule IDs and policy TC IDs, the steptriggertype
+    # should be split into its sub-types in cases where the associated
+    # coverages are covered separately
+    # For example, steptriggertype = 5 covers buildings and contents separately
+    def assign_sub_step_trigger_type(row):
+        try:
+            step_trigger_type = STEP_TRIGGER_TYPES[row['steptriggertype']]['sub_step_trigger_types'][row['coverage_type_id']]
+            return step_trigger_type
+        except KeyError:
+            return row['steptriggertype']
+        
+    if step_policies_present:
+        il_inputs_df['steptriggertype'] = il_inputs_df.apply(
+            lambda row: assign_sub_step_trigger_type(row), axis=1
+        )
+
     # Set the calc. rule IDs
     if 'cov_agg_id' in il_inputs_df:
         il_inputs_df.loc[
@@ -1038,7 +1046,11 @@ def write_fm_profile_file(il_inputs_df, fm_profile_fp, chunksize=100000):
                 'share1': 'share'
             }
             for col in cols:
-                fm_profile_df[col] = il_inputs_df.apply(lambda x: x[get_step_policies_oed_mapping(x['steptriggertype'])[col]] if x['steptriggertype'] > 0 and get_step_policies_oed_mapping(x['steptriggertype']).get(col) is not None and x['assign_step_calcrule'] == True else 0, axis=1)
+                try:
+                    fm_profile_df[col] = il_inputs_df.apply(lambda x: x[get_step_policies_oed_mapping(x['steptriggertype'])[col]] if x['steptriggertype'] > 0 and get_step_policies_oed_mapping(x['steptriggertype']).get(col) is not None and x['assign_step_calcrule'] == True else 0, axis=1)
+                    fm_profile_df[col].fillna(0, inplace=True)
+                except KeyError:
+                    fm_profile_df[col] = 0
             for col in non_step_cols_map.keys():
                 fm_profile_df.loc[
                     ~(il_inputs_df['steptriggertype'] > 0), col

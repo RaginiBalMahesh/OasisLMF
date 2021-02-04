@@ -148,7 +148,7 @@ class GenerateKeysDeterministic(ComputationStep):
         location_df = get_location_df(self.oed_location_csv)
 
         loc_ids = location_df['loc_id'].unique()
-		loc_ids.sort()
+        loc_ids.sort()
         keys = [
             {'loc_id': _loc_id, 'peril_id': peril, 'coverage_type': cov_type, 'area_peril_id': i + 1, 'vulnerability_id': i + 1}
             for i, (_loc_id, peril, cov_type) in enumerate(product(loc_ids, range(1, 1 + self.num_subperils), self.supported_oed_coverage_types))
